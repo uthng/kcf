@@ -1,9 +1,11 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -eou pipefail
 
 
 readonly SCRIPT_NAME="$(basename "$0")"
+readonly -a SUPPORTED_CMD=("exec" "log" "logs" "describe" "delete")
+readonly -a SUPPORTED_CMD_CONTAINER=("exec" "log" "logs")
 
 function print_usage {
     echo
@@ -75,12 +77,66 @@ function assert_error {
     fi
 }
 
+# Check if an item is in the array
+# Params:
+#   $1: item
+#   $2: array
+# Return
+#   1 if yes, 0 otherwise
+#
+# Examples:
+#   array_contains "B" ("A", "B", "C")
+#   Returns: 1
+function array_contains {
+    local -r item="$1"
+    shift
+    local -ra arr=("$@")
+
+    local it
+    for it in "${arr[@]}"; do
+        if [[ "$it" == "$item" ]]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+function array_split {
+    local -r separator="$1"
+    local -r str="$2"
+    local -a arr=()
+
+    IFS="$separator" read -a arr <<<"$str"
+
+    echo ${arr[*]}
+}
+
+function str_remove_multiple_spaces {
+    local -r str="$1"
+
+    echo -e "${str}" | sed 's/  */ /g'
+}
+
+function _kcf_get_pod_containers {
+    local -r podname="$1"
+    local -r opts="$2"
+
+    local str_opts=`str_remove_multiple_spaces "get pod/${podname} ${opts} -o jsonpath='{.spec.containers[*].name}'"`
+    # Dont know why there are quote un the returned string.
+    # So need to remove them and replace space by newline \n
+    # to show correctly the list with fzf
+    kubectl ${str_opts} | sed "s/\'//g" | tr " " "\n"
+}
+
 function _kcf_cmd {
     local readonly cmd="$1"
     local readonly type="$2"
     shift 2
 
     local ns=""
+    local get_opts=""
+    local cmd_opts=""
     local args=""
 
     while [[ $# > 0 ]]; do
@@ -88,17 +144,32 @@ function _kcf_cmd {
 
         case "$key" in
             -n|--namespace)
-                ns="-n $2"
+                get_opts="${get_opts} -n $2"
+                cmd_opts="${cmd_opts} -n $2"
                 shift 2
                 ;;
-            *|--)
-                args="${args} ${key}"
+            --)
+                args="${args} $@"
+                shift $#
+                ;;
+            *)
+                cmd_opts="${cmd_opts} ${key}"
                 shift
                 ;;
             esac
         done
 
-    local resources=$(kubectl get ${type} --no-headers ${ns})
+    #echo "get_opts $get_opts"
+    #echo "cmd_opts $cmd_opts"
+    #echo "args $args"
+
+    # Check cmd
+    if ! array_contains "${cmd}" "${SUPPORTED_CMD[@]}"; then
+        log_error "${cmd} not supported"
+        return 1
+    fi
+
+    local resources=$(kubectl get ${type} --no-headers ${get_opts})
 
     # Split string containing all resources to array with '\n' as delimiter
     local SAVEIFS=${IFS}
@@ -111,10 +182,16 @@ function _kcf_cmd {
         resource=$(echo "${resources}" | fzf | awk '{print $1}')
 
         # Clean spaces in case of namespace not specified
-        str_args=$(echo "${cmd} ${type}/${resource} ${ns} ${args}" | sed 's/  */ /g')
+        local str_opts=$(str_remove_multiple_spaces "${cmd} ${type}/${resource} ${cmd_opts}")
+        ## Check if cmd needs to specify container
+        if array_contains "${cmd}" "${SUPPORTED_CMD_CONTAINER[@]}"; then
+           local container=$(_kcf_get_pod_containers "${resource}" "${get_opts}" | fzf | awk '{print $1}')
+           #_kcf_get_pod_containers "${resource}" "${get_opts}"
+           str_opts="${str_opts} -c ${container}"
+        fi
 
-        log_info "kubectl ${str_args}"
-        kubectl ${str_args}
+        log_info "kubectl ${str_opts} ${args}"
+        kubectl ${str_opts} ${args}
     else
         log_warn "No resource found!"
     fi
