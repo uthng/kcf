@@ -1,0 +1,135 @@
+#!/bin/bash
+
+set -eou pipefail
+
+
+readonly SCRIPT_NAME="$(basename "$0")"
+
+function print_usage {
+    echo
+    echo "Usage: ${SCRIPT_NAME}"
+    echo
+    echo "This script wraps certain kubectl commands with fzf."
+    echo
+    echo "Commands:"
+    echo
+    echo -e "          --help: Print this help"
+    echo
+}
+
+function log {
+    local readonly level="$1"
+    local readonly message="$2"
+    local readonly timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+    local color=""
+    local reset_color="$(tput sgr0)"
+
+    if [[ "${level}" == "INFO" ]]; then
+        color="$(tput setaf 2)"
+    elif [[ "${level}" == "WARN" ]]; then
+        color="$(tput setaf 3)"
+    elif [[ "${level}" == "ERROR" ]]; then
+        color="$(tput setaf 1)"
+    fi
+
+    >&2 echo -e "${color}${timestamp} [${level}] [$SCRIPT_NAME] ${message}${reset_color}"
+}
+
+function log_info {
+    local readonly message="$1"
+    log "INFO" "$message"
+}
+
+function log_warn {
+    local readonly message="$1"
+    log "WARN" "$message"
+}
+
+function log_error {
+    local readonly message="$1"
+    log "ERROR" "$message"
+}
+
+function assert_not_empty {
+    local readonly arg_name="$1"
+    local readonly arg_value="$2"
+
+    if [[ -z "$arg_value" ]]; then
+        log_error "The value for '$arg_name' cannot be empty"
+        print_usage
+        exit 1
+    fi
+}
+
+function assert_error {
+    local readonly ret=$1
+    loca""l readonly msg="$2"
+
+    if [ ${ret} -ne 0 ]
+    then
+        if [ "${msg}" != "" ]
+        then
+            log_err "${msg}"
+        fi
+        exit 1
+    fi
+}
+
+function _kcf_cmd {
+    local readonly cmd="$1"
+    local readonly type="$2"
+    shift 2
+
+    local ns=""
+    local args=""
+
+    while [[ $# > 0 ]]; do
+        local key="$1"
+
+        case "$key" in
+            -n|--namespace)
+                ns="-n $2"
+                shift 2
+                ;;
+            *|--)
+                args="${args} ${key}"
+                shift
+                ;;
+            esac
+        done
+
+    local resources=$(kubectl get ${type} --no-headers ${ns})
+
+    # Split string containing all resources to array with '\n' as delimiter
+    local SAVEIFS=${IFS}
+    local IFS=$'\n'
+    local readonly arr_resources=($resources)
+    IFS=${SAVEIFS}
+
+    if [[ ${#arr_resources[@]} -gt 0 ]]; then
+        #echo "${resources}" | fzf | awk '{print $1}' | xargs -o -I % kubectl ${cmd} ${type}/% ${ns} ${args}
+        resource=$(echo "${resources}" | fzf | awk '{print $1}')
+
+        # Clean spaces in case of namespace not specified
+        str_args=$(echo "${cmd} ${type}/${resource} ${ns} ${args}" | sed 's/  */ /g')
+
+        log_info "kubectl ${str_args}"
+        kubectl ${str_args}
+    else
+        log_warn "No resource found!"
+    fi
+}
+
+function main {
+    if [[ $# -ge 2 ]]; then
+        _kcf_cmd "$@"
+        exit $?
+    else
+        log_error "At least 3 arguments are required!"
+    fi
+
+    print_usage
+    exit 1
+}
+
+main "$@"
