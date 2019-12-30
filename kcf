@@ -217,7 +217,7 @@ function main {
         _kcf_cmd "$@"
         exit $?
     else
-        log_error "At least 3 arguments are required!"
+        log_error "At least 2 arguments are required!"
     fi
 
     print_usage
