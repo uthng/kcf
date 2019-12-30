@@ -3,8 +3,8 @@
 
 set -eou pipefail
 
-
 readonly SCRIPT_NAME="$(basename "$0")"
+readonly FZF_OPTS=${FZF_OPTS:-"--ansi --no-preview"}
 readonly -a SUPPORTED_CMD=("exec" "log" "logs" "describe" "delete")
 readonly -a SUPPORTED_CMD_CONTAINER=("exec" "log" "logs")
 
@@ -195,13 +195,13 @@ function _kcf_cmd {
 
     if [[ ${#arr_resources[@]} -gt 0 ]]; then
         #echo "${resources}" | fzf | awk '{print $1}' | xargs -o -I % kubectl ${cmd} ${type}/% ${ns} ${args}
-        resource=$(echo "${resources}" | fzf | awk '{print $1}')
+        resource=$(echo "${resources}" | fzf ${FZF_OPTS} --header="Select a resource:" | awk '{print $1}')
 
         # Clean spaces in case of namespace not specified
         local str_opts=$(str_remove_multiple_spaces "${cmd} ${type}/${resource} ${cmd_opts}")
         ## Check if cmd needs to specify container
         if array_contains "${cmd}" "${SUPPORTED_CMD_CONTAINER[@]}"; then
-           local container=$(_kcf_get_pod_containers "${resource}" "${get_opts}" | fzf | awk '{print $1}')
+           local container=$(_kcf_get_pod_containers "${resource}" "${get_opts}" | fzf ${FZF_OPTS} --header="Select a container:" | awk '{print $1}')
            #_kcf_get_pod_containers "${resource}" "${get_opts}"
            str_opts="${str_opts} -c ${container}"
         fi
