@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+[[ -n $DEBUG ]] && set -x
 
 set -eou pipefail
 
@@ -8,30 +9,30 @@ readonly -a SUPPORTED_CMD=("exec" "log" "logs" "describe" "delete")
 readonly -a SUPPORTED_CMD_CONTAINER=("exec" "log" "logs")
 
 function print_usage {
-    echo
-    echo "${SCRIPT_NAME} wraps certain kubectl commands with fzf. It means that it allows you to select a resource corresponding to the specified type and perform the given command on it."
-    echo
-    echo "${SCRIPT_NAME} uses the same commands, resource types and options as kubectl."
-    echo
-    echo "Usage: ${SCRIPT_NAME} <CMD> <TYPE> <OPTION1>...<OPTIONX>"
-    echo
-    echo -e "CMD:       exec, log(s), describe and delete."
-    echo -e "TYPE:      all kubectl resource types supported by the above commands."
-    echo -e "OPTIONS:   all kubectl options normally used with the above commands & types."
-    echo
-    echo "Examples:"
-    echo -e "- Describe a pod in a given namespace:"
-    echo -e "  kcf describe pod -n istio-system"
-    echo
-    echo -e "- Execute a command shell in a container within a pod:"
-    echo -e "  kcf exec pod -n dsf-offer-catalog-orchestrator -- ls -la"
-    echo
-    echo -e "- Execute a interactive shell in a container within a pod:"
-    echo -e "  kcf exec pod -n dsf-offer-catalog-orchestrator -it -- bash"
-    echo
-    echo -e "- Watch logs of a container within a pod in a given namespace:"
-    echo -e "  kcf logs pod -n istio-system -f"
+    cat <<EOF
+    ${SCRIPT_NAME} wraps certain kubectl commands with fzf. It means that it allows you to select a resource corresponding to the specified type and perform the given command on it.
 
+    ${SCRIPT_NAME} uses the same commands, resource types and options as kubectl.
+
+    Usage: ${SCRIPT_NAME} <CMD> <TYPE> <OPTION1>...<OPTIONX>
+
+    CMD:       exec, log(s), describe and delete.
+    TYPE:      all kubectl resource types supported by the above commands.
+    OPTIONS:   all kubectl options normally used with the above commands & types.
+
+    Examples:
+    - Describe a pod in a given namespace:
+      kcf describe pod -n istio-system
+
+    - Execute a command shell in a container within a pod:
+      kcf exec pod -n dsf-offer-catalog-orchestrator -- ls -la
+
+    - Execute a interactive shell in a container within a pod:
+      kcf exec pod -n dsf-offer-catalog-orchestrator -it -- bash
+
+    - Watch logs of a container within a pod in a given namespace:
+      kcf logs pod -n istio-system -f
+EOF
 }
 
 function log {
