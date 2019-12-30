@@ -8,6 +8,7 @@ readonly FZF_OPTS=${FZF_OPTS:-"--ansi --no-preview"}
 readonly -a SUPPORTED_CMD=("exec" "log" "logs" "describe" "delete")
 readonly -a SUPPORTED_CMD_CONTAINER=("exec" "log" "logs")
 
+# Print usage or help of this script
 function print_usage {
     cat <<EOF
     ${SCRIPT_NAME} wraps certain kubectl commands with fzf. It means that it allows you to select a resource corresponding to the specified type and perform the given command on it.
@@ -35,6 +36,16 @@ function print_usage {
 EOF
 }
 
+# Print log message with level and corresponding color
+# Params:
+#   $1: level
+#   $2: message
+# Return
+#   string log message with date, level, program and color
+#
+# Examples:
+#   log "INFO" "This is INFO level"
+#   Returns: N/A
 function log {
     local readonly level="$1"
     local readonly message="$2"
@@ -53,21 +64,58 @@ function log {
     >&2 echo -e "${color}${timestamp} [${level}] [$SCRIPT_NAME] ${message}${reset_color}"
 }
 
+# Print INFO log message
+# Params:
+#   $1: message
+# Return
+#   string log message with level INFO
+#
+# Examples:
+#   log_info This is INFO level"
+#   Returns: N/A
 function log_info {
     local readonly message="$1"
     log "INFO" "$message"
 }
 
+# Print WARN log message
+# Params:
+#   $1: message
+# Return
+#   string log message with level WARN
+#
+# Examples:
+#   log_warn This is WARN level"
+#   Returns: N/A
 function log_warn {
     local readonly message="$1"
     log "WARN" "$message"
 }
 
+# Print ERROR log message
+# Params:
+#   $1: message
+# Return
+#   string log message with level ERROR
+#
+# Examples:
+#   log_error This is ERROR level"
+#   Returns: N/A
 function log_error {
     local readonly message="$1"
     log "ERROR" "$message"
 }
 
+# Assert non empty with exit
+# Params:
+#   $1: name
+#   $2: value
+# Return
+#   N/A
+#
+# Examples:
+#   assert_not_empty "--base-datadir" "${base_datadir}"
+#   Returns: N/A
 function assert_not_empty {
     local readonly arg_name="$1"
     local readonly arg_value="$2"
@@ -79,9 +127,19 @@ function assert_not_empty {
     fi
 }
 
+# Assert error with messsage and exit
+# Params:
+#   $1: returned value
+#   $2: message error
+# Return
+#   N/A
+#
+# Examples:
+#   assert_error "$ret" "Message error"
+#   Returns: N/A
 function assert_error {
     local readonly ret=$1
-    loca""l readonly msg="$2"
+    local readonly msg="$2"
 
     if [ ${ret} -ne 0 ]
     then
@@ -118,6 +176,16 @@ function array_contains {
     return 1
 }
 
+# Split a string to an array
+# Params:
+#   $1: separator
+#   $2: string
+# Return
+#   an array
+#
+# Examples:
+#   array_split "," "A,B,C"
+#   Returns: ("A" "B" "C")
 function array_split {
     local -r separator="$1"
     local -r str="$2"
@@ -128,23 +196,46 @@ function array_split {
     echo ${arr[*]}
 }
 
+# Remove multiple spaces between words of a string
+# Params:
+#   $1: string
+# Return
+#   string
+#
+# Examples:
+#   str_remove_multiple_spaces "aa     bb   cc"
+#   Returns: "aa bb cc"
 function str_remove_multiple_spaces {
     local -r str="$1"
 
     echo -e "${str}" | sed 's/  */ /g'
 }
 
+# Get a list of containers within a pod
+# Params:
+#   $1: pod name
+#   $2: options compatible with command `kubectl get pod`
+# Return
+#   string containing containers with separator newline "\n"
+#
+# Examples:
+#   _kcf_get_pod_containers "grafana-5f68d98f87-hvmbb" "-n istio-system"
+#   Returns: "grafana\nistio-proxy"
 function _kcf_get_pod_containers {
     local -r podname="$1"
     local -r opts="$2"
 
     local str_opts=`str_remove_multiple_spaces "get pod/${podname} ${opts} -o jsonpath='{.spec.containers[*].name}'"`
+
+    log_info "kubectl ${str_opts}"
+
     # Dont know why there are quote un the returned string.
     # So need to remove them and replace space by newline \n
     # to show correctly the list with fzf
     kubectl ${str_opts} | sed "s/\'//g" | tr " " "\n"
 }
 
+# Parse options and execute kubectl commands
 function _kcf_cmd {
     local readonly cmd="$1"
     local readonly type="$2"
@@ -175,10 +266,6 @@ function _kcf_cmd {
             esac
         done
 
-    #echo "get_opts $get_opts"
-    #echo "cmd_opts $cmd_opts"
-    #echo "args $args"
-
     # Check cmd
     if ! array_contains "${cmd}" "${SUPPORTED_CMD[@]}"; then
         log_error "${cmd} not supported"
@@ -199,10 +286,12 @@ function _kcf_cmd {
 
         # Clean spaces in case of namespace not specified
         local str_opts=$(str_remove_multiple_spaces "${cmd} ${type}/${resource} ${cmd_opts}")
-        ## Check if cmd needs to specify container
+        # Check if cmd needs to specify container
         if array_contains "${cmd}" "${SUPPORTED_CMD_CONTAINER[@]}"; then
-           local container=$(_kcf_get_pod_containers "${resource}" "${get_opts}" | fzf ${FZF_OPTS} --header="Select a container:" | awk '{print $1}')
-           #_kcf_get_pod_containers "${resource}" "${get_opts}"
+            # Must store the result into an intermediare variable because of
+            # log_info in the function _kcf_get_pod_containers
+            local containers=$(_kcf_get_pod_containers "${resource}" "${get_opts}")
+            local container=$(echo "${containers}"| fzf ${FZF_OPTS} --header="Select a container:" | awk '{print $1}')
            str_opts="${str_opts} -c ${container}"
         fi
 
@@ -213,6 +302,7 @@ function _kcf_cmd {
     fi
 }
 
+# Main
 function main {
     if [[ $# -ge 2 ]]; then
         _kcf_cmd "$@"
