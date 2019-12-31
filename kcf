@@ -156,24 +156,26 @@ function assert_error {
 #   $1: item
 #   $2: array
 # Return
-#   1 if yes, 0 otherwise
+#   index of element if found, -1 otherwise
 #
 # Examples:
 #   array_contains "B" ("A", "B", "C")
-#   Returns: 1
+#   Returns: "1"
 function array_contains {
     local -r item="$1"
     shift
     local -ra arr=("$@")
 
-    local it
-    for it in "${arr[@]}"; do
-        if [[ "$it" == "$item" ]]; then
-            return 0
+    local nb=${#arr[@]}
+
+    for (( i=0; i<${nb}; i++ )); do
+        if [[ "${item}" == "${arr[$i]}" ]]; then
+            echo "$i"
+            return
         fi
     done
 
-    return 1
+    echo "-1"
 }
 
 # Split a string to an array
@@ -191,24 +193,26 @@ function array_split {
     local -r str="$2"
     local -a arr=()
 
-    IFS="$separator" read -a arr <<<"$str"
+    #IFS="$separator" read -a arr <<<"$str"
+    arr=($(echo "${str}" | tr "${separator}" "\n"))
 
     echo ${arr[*]}
 }
 
-# Remove multiple spaces between words of a string
+# Remove leading spaces, trailing spaces and 
+# multiple spaces between words of a string
 # Params:
 #   $1: string
 # Return
 #   string
 #
 # Examples:
-#   str_remove_multiple_spaces "aa     bb   cc"
+#   str_remove_spaces " aa     bb   cc  "
 #   Returns: "aa bb cc"
-function str_remove_multiple_spaces {
+function str_remove_spaces {
     local -r str="$1"
 
-    echo -e "${str}" | sed 's/  */ /g'
+    echo -e "${str}" | sed 's/^ *//g;s/  */ /g;s/ *$//g'
 }
 
 # Get a list of containers within a pod
@@ -225,7 +229,7 @@ function _kcf_get_pod_containers {
     local -r podname="$1"
     local -r opts="$2"
 
-    local str_opts=`str_remove_multiple_spaces "get pod/${podname} ${opts} -o jsonpath='{.spec.containers[*].name}'"`
+    local str_opts=`str_remove_spaces "get pod/${podname} ${opts} -o jsonpath='{.spec.containers[*].name}'"`
 
     log_info "kubectl ${str_opts}"
 
@@ -235,13 +239,22 @@ function _kcf_get_pod_containers {
     kubectl ${str_opts} | sed "s/\'//g" | tr " " "\n"
 }
 
+# Get header line of resource list and convert it to an array
+function _kcf_get_resource_header {
+    local -r resources="$1"
+
+    local header=$(echo "$resources" | head -n 1)
+}
+
 # Parse options and execute kubectl commands
 function _kcf_cmd {
     local readonly cmd="$1"
     local readonly type="$2"
     shift 2
 
-    local ns=""
+    local is_all_ns=0
+    local idx_ns=-1
+    local idx_name=1
     local get_opts=""
     local cmd_opts=""
     local args=""
@@ -255,6 +268,11 @@ function _kcf_cmd {
                 cmd_opts="${cmd_opts} -n $2"
                 shift 2
                 ;;
+            -A|--all-namespaces)
+                get_opts="${get_opts} ${key}"
+                is_all_ns=1
+                shift 1
+                ;;
             --)
                 args="${args} $@"
                 shift $#
@@ -267,36 +285,64 @@ function _kcf_cmd {
         done
 
     # Check cmd
-    if ! array_contains "${cmd}" "${SUPPORTED_CMD[@]}"; then
+    if [[ "$(array_contains "${cmd}" "${SUPPORTED_CMD[@]}")" == "-1" ]]; then
         log_error "${cmd} not supported"
         return 1
     fi
 
-    local resources=$(kubectl get ${type} --no-headers ${get_opts})
+    local resources=$(kubectl get ${type} ${get_opts})
 
     # Split string containing all resources to array with '\n' as delimiter
-    local SAVEIFS=${IFS}
-    local IFS=$'\n'
-    local readonly arr_resources=($resources)
-    IFS=${SAVEIFS}
+    #local SAVEIFS=${IFS}
+    #local IFS=$'\n'
+    #local readonly arr_resources=($resources)
+    #IFS=${SAVEIFS}
 
-    if [[ ${#arr_resources[@]} -gt 0 ]]; then
+    if [[ $(echo "$resources" | wc -l) -gt 1 ]]; then
         #echo "${resources}" | fzf | awk '{print $1}' | xargs -o -I % kubectl ${cmd} ${type}/% ${ns} ${args}
-        resource=$(echo "${resources}" | fzf ${FZF_OPTS} --header="Select a resource:" | awk '{print $1}')
 
-        # Clean spaces in case of namespace not specified
-        local str_opts=$(str_remove_multiple_spaces "${cmd} ${type}/${resource} ${cmd_opts}")
+        # Special treatment in case of all namespace
+        # because the kubectl default output will have an additional column namespace
+        # Get the header line from resource output, then get position of namespace
+        # and name fields from it.
+        if [[ ${is_all_ns} -eq 1 ]]; then
+            local -a arr_header=($(echo "${resources}" | head -n 1))
+            idx_ns=$(($(array_contains "NAMESPACE" "${arr_header[@]}") + 1))
+            idx_name=$(($(array_contains "NAME" "${arr_header[@]}") + 1))
+        fi
+
+        # tail -n +2 to show all lines except for the header
+        # awk according to the index values of the fields namespace and name in the header line
+        # if namespace field is not present (index < -1), then only print name field.
+        # We reverse orders of namespace & name while printing.
+        # Like that, resource_name variable is always set even in the case of non presence
+        # of namespace field.
+        read -r resource_name resource_ns <<< $(echo "${resources}" | tail -n +2 | fzf ${FZF_OPTS} --header="Select a resource:" | awk -v idx_ns=${idx_ns} -v idx_name=${idx_name} '{if (idx_ns > 0)  printf("%s %s", $idx_name, $idx_ns); else printf("%s", $idx_name)}')
+
+        # If namespace is defined (--all-namespaces case)
+        # then add "-n" to define option
+        if [[ -n "${resource_ns}" ]]; then
+            resource_ns="-n ${resource_ns}"
+        fi
+
+        # Concatenate options
+        local str_opts="${cmd} ${type}/${resource_name} ${resource_ns} ${cmd_opts}"
+
         # Check if cmd needs to specify container
-        if array_contains "${cmd}" "${SUPPORTED_CMD_CONTAINER[@]}"; then
+        if [[ "$(array_contains "${cmd}" "${SUPPORTED_CMD_CONTAINER[@]}")" != "-1" ]]; then
             # Must store the result into an intermediare variable because of
             # log_info in the function _kcf_get_pod_containers
-            local containers=$(_kcf_get_pod_containers "${resource}" "${get_opts}")
+            local containers=$(_kcf_get_pod_containers "${resource_name}" "${resource_ns}")
             local container=$(echo "${containers}"| fzf ${FZF_OPTS} --header="Select a container:" | awk '{print $1}')
+
            str_opts="${str_opts} -c ${container}"
         fi
 
-        log_info "kubectl ${str_opts} ${args}"
-        kubectl ${str_opts} ${args}
+        # Add args and clean spaces in the final option string
+        str_opts=$(str_remove_spaces "${str_opts} ${args}")
+
+        log_info "kubectl ${str_opts}"
+        kubectl ${str_opts}
     else
         log_warn "No resource found!"
     fi
