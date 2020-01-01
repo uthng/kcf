@@ -252,7 +252,7 @@ function _kcf_cmd {
     local readonly type="$2"
     shift 2
 
-    local is_all_ns=0
+    local namespace=""
     local idx_ns=-1
     local idx_name=1
     local get_opts=""
@@ -264,13 +264,12 @@ function _kcf_cmd {
 
         case "$key" in
             -n|--namespace)
-                get_opts="${get_opts} -n $2"
-                cmd_opts="${cmd_opts} -n $2"
+                namespace="-n $2"
                 shift 2
                 ;;
             -A|--all-namespaces)
-                get_opts="${get_opts} ${key}"
-                is_all_ns=1
+                #get_opts="${get_opts} ${key}"
+                namespace="${key}"
                 shift 1
                 ;;
             --)
@@ -290,7 +289,10 @@ function _kcf_cmd {
         return 1
     fi
 
-    local resources=$(kubectl get ${type} ${get_opts})
+    # Get resource list
+    local str_opts="get ${type} ${namespace} ${get_opts}"
+    log_info "kubectl ${str_opts}"
+    local resources=$(kubectl ${str_opts})
 
     # Split string containing all resources to array with '\n' as delimiter
     #local SAVEIFS=${IFS}
@@ -305,7 +307,7 @@ function _kcf_cmd {
         # because the kubectl default output will have an additional column namespace
         # Get the header line from resource output, then get position of namespace
         # and name fields from it.
-        if [[ ${is_all_ns} -eq 1 ]]; then
+        if [[ "${namespace}" == "-A" || "${namespace}" == "--all-namespaces" ]]; then
             local -a arr_header=($(echo "${resources}" | head -n 1))
             idx_ns=$(($(array_contains "NAMESPACE" "${arr_header[@]}") + 1))
             idx_name=$(($(array_contains "NAME" "${arr_header[@]}") + 1))
@@ -323,6 +325,8 @@ function _kcf_cmd {
         # then add "-n" to define option
         if [[ -n "${resource_ns}" ]]; then
             resource_ns="-n ${resource_ns}"
+        else
+            resource_ns="${namespace}"
         fi
 
         # Concatenate options
