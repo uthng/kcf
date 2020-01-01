@@ -4,7 +4,7 @@
 set -eou pipefail
 
 readonly SCRIPT_NAME="$(basename "$0")"
-readonly FZF_OPTS=${FZF_OPTS:-"--ansi --no-preview"}
+readonly FZF_OPTS=${FZF_OPTS:-"--ansi --no-preview --layout=reverse"}
 readonly -a SUPPORTED_CMD=("exec" "log" "logs" "describe" "delete")
 readonly -a SUPPORTED_CMD_CONTAINER=("exec" "log" "logs")
 
