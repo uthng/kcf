@@ -5,8 +5,8 @@ set -eou pipefail
 
 readonly SCRIPT_NAME="$(basename "$0")"
 readonly FZF_OPTS=${FZF_OPTS:-"--ansi --no-preview --layout=reverse"}
-readonly -a SUPPORTED_CMD=("exec" "log" "logs" "describe" "delete")
-readonly -a SUPPORTED_CMD_CONTAINER=("exec" "log" "logs")
+readonly -a SUPPORTED_CMD=("exec" "logs" "describe" "delete" "rollout" "scale" "autoscale" "label" "annotate")
+readonly -a SUPPORTED_CMD_CONTAINER=("exec" "logs")
 
 # Print usage or help of this script
 function print_usage {
@@ -17,7 +17,7 @@ function print_usage {
 
     Usage: ${SCRIPT_NAME} <CMD> <TYPE> <OPTION1>...<OPTIONX>
 
-    CMD:       exec, log(s), describe and delete.
+    CMD:       $(array_join ", " "${SUPPORTED_CMD[@]}")
     TYPE:      all kubectl resource types supported by the above commands.
     OPTIONS:   all kubectl options normally used with the above commands & types.
 
@@ -199,6 +199,24 @@ function array_split {
     echo ${arr[*]}
 }
 
+# Join elements of an array with given separator
+# Params:
+#   $1: separator
+#   $2: array
+# Return
+#   string
+#
+# Examples:
+#   array_join "," ("A" "B" "C")
+#   Returns: A,B,C
+function array_join {
+    local -r separator="$1"
+    shift
+    local -r arr_str="$@"
+
+    echo "${arr_str// /${separator}}"
+}
+
 # Remove leading spaces, trailing spaces and 
 # multiple spaces between words of a string
 # Params:
@@ -246,11 +264,30 @@ function _kcf_get_resource_header {
     local header=$(echo "$resources" | head -n 1)
 }
 
+function _kcf_get_api_resources {
+    local -r api_resources=$(kubectl api-resources)
+    local -r header=$(echo "${api_resources}" | head -n 1)
+    local -r arr_header=($(echo "${header}"))
+
+    local -r indexes=($(for f in "${arr_header[@]}"; do echo "${header}" | awk -v field=$f '{print index($0, field)}'; done))
+
+    # Just name & shortnames if exists
+    local -r arr_resources=($(echo "${api_resources}" | tail -n +2 | awk -v idx_name=${indexes[0]} -v idx_shortname=${indexes[1]} -v idx_apigroup=${indexes[2]} '{printf "%s %s\n", substr($0, idx_name, (idx_shortname-idx_name)), substr($0, idx_shortname, (idx_apigroup-idx_shortname))}'))
+
+    echo "${arr_resources[@]}"
+}
+
 # Parse options and execute kubectl commands
 function _kcf_cmd {
     local readonly cmd="$1"
     local readonly type="$2"
     shift 2
+
+    # Check resource type
+    if [[ "$(array_contains "${type}" $(_kcf_get_api_resources))" == "-1" ]]; then
+        log_error "Resource type ${type} not supported!"
+        return 1
+    fi
 
     local namespace=""
     local idx_ns=-1
