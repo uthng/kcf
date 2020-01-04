@@ -6,6 +6,7 @@ set -eou pipefail
 readonly SCRIPT_NAME="$(basename "$0")"
 readonly FZF_OPTS=${FZF_OPTS:-"--ansi --no-preview --layout=reverse"}
 readonly -a SUPPORTED_CMD=("exec" "logs" "describe" "delete" "rollout" "scale" "autoscale" "label" "annotate")
+readonly -a CUSTOM_CMD=("kb" "ka")
 readonly -a SUPPORTED_CMD_CONTAINER=("exec" "logs")
 
 # Print usage or help of this script
@@ -300,7 +301,7 @@ function _kcf_colorize_resources {
 function _kcf_colorize_type_pod {
     local -r resources="$1"
     local -r arr_header=($(echo "${resources}" | head -n 1))
-    local -r blue=$(tput setaf 004)
+    local -r cyan=$(tput setaf 006)
     local -r grey=$(tput setaf 245)
     local -r yellow=$(tput setaf 179)
     local -r red=$(tput setaf 001)
@@ -309,12 +310,12 @@ function _kcf_colorize_type_pod {
     # Get automatically position of STATUS field from header line
     local -r idx_status=$(($(array_contains "STATUS" "${arr_header[@]}") + 1))
 
-    echo "${resources}" | awk -v idx_status=${idx_status} -v blue="${blue}" -v grey="${grey}" -v yellow="${yellow}" -v red="${red}" -v normal="${normal}" '{
+    echo "${resources}" | awk -v idx_status=${idx_status} -v cyan="${cyan}" -v grey="${grey}" -v yellow="${yellow}" -v red="${red}" -v normal="${normal}" '{
         # Only treat after header line
         if (NR > 1) {
             color = normal
             if ($idx_status == "Running") {
-                color = blue
+                color = cyan
             } else if ($idx_status == "Completed" || $idx_status == "Succeeded") {
                 color = grey
             } else if ($idx_status == "Pending") {
