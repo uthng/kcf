@@ -435,31 +435,33 @@ function _kcf_kubectl_cmd {
 
 # Main
 function main {
-    if [[ $# -ge 2 ]]; then
+    if [[ $# -lt 1 ]]; then
+        log_error "No argument found!"
+        print_usage
+        exit 1
+    elif [[ $# -eq 1 ]]; then
+        log_warn "At least 2 arguments are required. 'kubectl' will be used instead. Type 'kcf' to see help."
+    elif [[ $# -ge 2 ]]; then
         local readonly cmd="$1"
         local readonly type="$2"
 
-        # Check cmd
+        # Check cmd. If cmd not supported, call kubectl instead.
         if [[ "$(array_contains "${cmd}" "${SUPPORTED_CMD[@]}")" == "-1" ]]; then
-            log_error "${cmd} not supported!"
-            print_usage
-            return 1
-        fi
+            log_warn "${cmd} not supported! 'kubectl' will be used instead. Type 'kcf' to see help."
+        else
+            # Check resource type. If resource type is not in the list of api-resources
+            # then return error.
+            if [[ "$(array_contains "${type}" $(_kcf_get_api_resources))" == "-1" ]]; then
+                log_error "Resource type ${type} not supported!. Type 'kcf api-resources' to known more."
+                return 1
+            fi
 
-        # Check resource type
-        if [[ "$(array_contains "${type}" $(_kcf_get_api_resources))" == "-1" ]]; then
-            log_error "Resource type ${type} not supported!. Type 'kubectl api-resources' to known more."
-            return 1
+            _kcf_kubectl_cmd "$@"
+            exit $?
         fi
-
-        _kcf_kubectl_cmd "$@"
-        exit $?
-    else
-        log_error "At least 2 arguments are required!"
     fi
 
-    print_usage
-    exit 1
-}
+    kubectl "$@"
+ }
 
 main "$@"
