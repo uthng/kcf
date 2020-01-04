@@ -264,21 +264,74 @@ function _kcf_get_resource_header {
     local header=$(echo "$resources" | head -n 1)
 }
 
+# Get a list of names & shortnames from api-resources
+# convert it to an array
 function _kcf_get_api_resources {
     local -r api_resources=$(kubectl api-resources)
+    # Get header line & convert it to an array of fields
     local -r header=$(echo "${api_resources}" | head -n 1)
     local -r arr_header=($(echo "${header}"))
 
+    # Get position of each field in the header line
     local -r indexes=($(for f in "${arr_header[@]}"; do echo "${header}" | awk -v field=$f '{print index($0, field)}'; done))
 
-    # Just name & shortnames if exists
+    # Loop line by line and only print name & shortnames if exists
+    # by computing the field's position & length
     local -r arr_resources=($(echo "${api_resources}" | tail -n +2 | awk -v idx_name=${indexes[0]} -v idx_shortname=${indexes[1]} -v idx_apigroup=${indexes[2]} '{printf "%s %s\n", substr($0, idx_name, (idx_shortname-idx_name)), substr($0, idx_shortname, (idx_apigroup-idx_shortname))}'))
 
     echo "${arr_resources[@]}"
 }
 
+function _kcf_colorize_resources {
+    local -r type="$1"
+    local -r resources="$2"
+
+    case "${type}" in
+        pods)
+            echo "$(_kcf_colorize_type_pod "${resources}")"
+            ;;
+        *)
+            echo "${resources}"
+            ;;
+    esac
+}
+
+# Colorize pod resources according to  their status.
+function _kcf_colorize_type_pod {
+    local -r resources="$1"
+    local -r arr_header=($(echo "${resources}" | head -n 1))
+    local -r blue=$(tput setaf 004)
+    local -r grey=$(tput setaf 245)
+    local -r yellow=$(tput setaf 179)
+    local -r red=$(tput setaf 001)
+    local -r normal=$(tput sgr0)
+
+    # Get automatically position of STATUS field from header line
+    local -r idx_status=$(($(array_contains "STATUS" "${arr_header[@]}") + 1))
+
+    echo "${resources}" | awk -v idx_status=${idx_status} -v blue="${blue}" -v grey="${grey}" -v yellow="${yellow}" -v red="${red}" -v normal="${normal}" '{
+        # Only treat after header line
+        if (NR > 1) {
+            color = normal
+            if ($idx_status == "Running") {
+                color = blue
+            } else if ($idx_status == "Completed" || $idx_status == "Succeeded") {
+                color = grey
+            } else if ($idx_status == "Pending") {
+                color = yellow
+            } else {
+                color = red
+            }
+
+            printf("%s%s%s\n", color, $0, normal)
+        } else {
+            printf("%s\n", $0)
+        }
+    }'
+}
+
 # Parse options and execute kubectl commands
-function _kcf_cmd {
+function _kcf_kubectl_cmd {
     local readonly cmd="$1"
     local readonly type="$2"
     shift 2
@@ -318,6 +371,9 @@ function _kcf_cmd {
     local str_opts="get ${type} ${namespace} ${get_opts}"
     log_info "kubectl ${str_opts}"
     local resources=$(kubectl ${str_opts})
+
+    # Colorize eventually resource list
+    resources=$(_kcf_colorize_resources "${type}" "${resources}")
 
     # Split string containing all resources to array with '\n' as delimiter
     #local SAVEIFS=${IFS}
@@ -396,7 +452,7 @@ function main {
             return 1
         fi
 
-        _kcf_cmd "$@"
+        _kcf_kubectl_cmd "$@"
         exit $?
     else
         log_error "At least 2 arguments are required!"
