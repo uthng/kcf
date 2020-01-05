@@ -8,6 +8,7 @@ readonly FZF_OPTS=${FZF_OPTS:-"--ansi --no-preview --layout=reverse"}
 readonly -a SUPPORTED_CMD=("exec" "logs" "describe" "delete" "rollout" "scale" "autoscale" "label" "annotate")
 readonly -a CUSTOM_CMD=("kb" "ka")
 readonly -a SUPPORTED_CMD_CONTAINER=("exec" "logs")
+readonly -a SUPPORTED_CMD_MULTIPLE_SELECTION=("delete")
 
 # Print usage or help of this script
 function print_usage {
@@ -342,7 +343,7 @@ function _kcf_kustomize_cmd {
     local -r folders=$(find ${path} -name "*kustomization*" | sed 's/kustomization.*$//g')
     assert_not_empty  "${folders}" "No folder containing one of 'kustomization.yaml', 'kustomization.yml' or 'Kustomization' in directory ${path}"
 
-    local -r folder=$(echo "${folders}" | fzf ${FZF_OPTS} --header="Select a kustomize folder:")
+    local -r folder=$(echo "${folders}" | fzf ${FZF_OPTS} -m --header="Select a kustomize folder:")
     assert_not_empty "${folder}" "Folder must not be empty!"
 
     local -r kustomize_build="kustomize build ${folder}"
@@ -390,6 +391,7 @@ function _kcf_kubectl_cmd {
     local get_opts=""
     local cmd_opts=""
     local args=""
+    local multiple_selection=0
 
     while [[ $# > 0 ]]; do
         local key="$1"
@@ -442,43 +444,81 @@ function _kcf_kubectl_cmd {
             idx_name=$(($(array_contains "NAME" "${arr_header[@]}") + 1))
         fi
 
+        local FZF_CUSTOM_OPTS=""
+        local FZF_HEADER=""
+
+        # Enable multi-select mode for commands: DELETE
+        if [[ "$(array_contains "${cmd}" "${SUPPORTED_CMD_MULTIPLE_SELECTION[@]}")" != "-1" ]]; then
+            multiple_selection=1
+            FZF_CUSTOM_OPTS="${FZF_OPTS} -m"
+            FZF_HEADER="Select one or multiple resources (using TAB):"
+        else
+            FZF_CUSTOM_OPTS="${FZF_OPTS}"
+            FZF_HEADER="Select a resource:"
+        fi
+
+        echo "$FZF_CUSTOM_OPTS"
         # tail -n +2 to show all lines except for the header
         # awk according to the index values of the fields namespace and name in the header line
         # if namespace field is not present (index < -1), then only print name field.
         # We reverse orders of namespace & name while printing.
         # Like that, resource_name variable is always set even in the case of non presence
         # of namespace field.
-        read -r resource_name resource_ns <<< $(echo "${resources}" | tail -n +2 | fzf ${FZF_OPTS} --header="Select a resource:" | awk -v idx_ns=${idx_ns} -v idx_name=${idx_name} '{if (idx_ns > 0)  printf("%s %s", $idx_name, $idx_ns); else printf("%s", $idx_name)}')
 
-        # If namespace is defined (--all-namespaces case)
-        # then add "-n" to define option
-        if [[ -n "${resource_ns}" ]]; then
-            resource_ns="-n ${resource_ns}"
+        read -a selected_resources <<< $(echo "${resources}" | tail -n +2 | fzf ${FZF_CUSTOM_OPTS} --header="${FZF_HEADER}"| awk -v idx_ns=${idx_ns} -v idx_name=${idx_name} '{if (idx_ns > 0)  printf("%s %s ", $idx_name, $idx_ns); else printf("%s ", $idx_name)}')
+
+        local str_opts=""
+        local resource_ns=""
+        local resource_names=""
+
+        # Only in the case of --all-namespaces and multiple selection (DELETE)
+        # we need to loop 'selected_resources' 2 per 2 to get resource name & namespace
+        # and execute kubectl command for it
+        if [[ ${idx_ns} -gt 0 && ${multiple_selection} -eq 1 ]]; then
+            for ((i=0; i<${#selected_resources[@]}; i=i+2 )); do
+                str_opts="${cmd} ${type} ${selected_resources[$i]} -n ${selected_resources[(($i+1))]} ${cmd_opts}"
+                log_info "kubectl $str_opts"
+                #kubectl $str_opts
+            done
         else
-            resource_ns="${namespace}"
+
+            # When we arrive here, there are 2 cases:
+            # - all namespaces without multiple selection: awk result is composed of 2 fields: resource name (unique) and resource namespace
+            # - multiple selection without all namespaces: namespace is the value specified in command line and resource names is a string composed of multiple values selected from fzf
+
+            # If namespace is defined (--all-namespaces case)
+            # (index of namespace field in header line > 0)
+            # then add "-n" to define option
+            if [[ ${idx_ns} -gt 0 ]]; then
+                resource_ns="-n ${selected_resources[1]}"
+                resource_names="${selected_resources[0]}"
+            else
+                resource_ns="${namespace}"
+                resource_names="${selected_resources[@]}"
+            fi
+
+            # Concatenate options
+            str_opts="${cmd} ${type} ${resource_names} ${resource_ns} ${cmd_opts}"
+
+            # Check if cmd needs to specify container
+            if [[ "$(array_contains "${cmd}" "${SUPPORTED_CMD_CONTAINER[@]}")" != "-1" ]]; then
+                # Must store the result into an intermediare variable because of
+                # log_info in the function _kcf_get_pod_containers
+                local containers=$(_kcf_get_pod_containers "${resource_names}" "${resource_ns}")
+                local container=$(echo "${containers}"| fzf ${FZF_OPTS} --header="Select a container:" | awk '{print $1}')
+
+                str_opts="${str_opts} -c ${container}"
+            fi
+
+            # Add args and clean spaces in the final option string
+            str_opts=$(str_remove_spaces "${str_opts} ${args}")
+
+            log_info "kubectl ${str_opts}"
+            #kubectl ${str_opts}
         fi
-
-        # Concatenate options
-        local str_opts="${cmd} ${type}/${resource_name} ${resource_ns} ${cmd_opts}"
-
-        # Check if cmd needs to specify container
-        if [[ "$(array_contains "${cmd}" "${SUPPORTED_CMD_CONTAINER[@]}")" != "-1" ]]; then
-            # Must store the result into an intermediare variable because of
-            # log_info in the function _kcf_get_pod_containers
-            local containers=$(_kcf_get_pod_containers "${resource_name}" "${resource_ns}")
-            local container=$(echo "${containers}"| fzf ${FZF_OPTS} --header="Select a container:" | awk '{print $1}')
-
-           str_opts="${str_opts} -c ${container}"
-        fi
-
-        # Add args and clean spaces in the final option string
-        str_opts=$(str_remove_spaces "${str_opts} ${args}")
-
-        log_info "kubectl ${str_opts}"
-        kubectl ${str_opts}
     else
         log_warn "No resource found!"
-    fi
+        fi
 }
 
 # Main
