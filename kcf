@@ -109,21 +109,20 @@ function log_error {
 
 # Assert non empty with exit
 # Params:
-#   $1: name
-#   $2: value
+#   $1: value
+#   $2: error msg
 # Return
 #   N/A
 #
 # Examples:
-#   assert_not_empty "--base-datadir" "${base_datadir}"
+#   assert_not_empty "${base_datadir}" "base_datadir must not be empty"
 #   Returns: N/A
 function assert_not_empty {
-    local readonly arg_name="$1"
-    local readonly arg_value="$2"
+    local readonly value="$1"
+    local readonly msg="$2"
 
-    if [[ -z "$arg_value" ]]; then
-        log_error "The value for '$arg_name' cannot be empty"
-        print_usage
+    if [[ -z "${value}" ]]; then
+        log_error "${msg}"
         exit 1
     fi
 }
@@ -331,6 +330,54 @@ function _kcf_colorize_type_pod {
     }'
 }
 
+# Handle kustomize commands
+function _kcf_kustomize_cmd {
+    local -r cmd="$1"
+    local path="."
+
+    if [[ $# -ge 2 ]]; then
+        path="$2"
+    fi
+
+    local -r folders=$(find ${path} -name "*kustomization*" | sed 's/kustomization.*$//g')
+    assert_not_empty  "${folders}" "No folder containing one of 'kustomization.yaml', 'kustomization.yml' or 'Kustomization' in directory ${path}"
+
+    local -r folder=$(echo "${folders}" | fzf ${FZF_OPTS} --header="Select a kustomize folder:")
+    assert_not_empty "${folder}" "Folder must not be empty!"
+
+    local -r kustomize_build="kustomize build ${folder}"
+    local kustomize_cmd=""
+
+    if [[ "${cmd}" == "kb" ]]; then
+        kustomize_cmd="${kustomize_build}"
+    elif [[ "${cmd}" == "ka" ]]; then
+        kustomize_cmd="${kustomize_build} | kubectl apply -f -"
+    elif [[ "${cmd}" == "kd" ]]; then
+        kustomize_cmd="${kustomize_build} | kubectl delete -f -"
+    else
+        log_error "Kustomize command ${cmd} unknown!"
+        return 1
+    fi
+
+    log_info "${kustomize_cmd}"
+    ${kustomize_cmd}
+}
+
+# Execute custom commands
+function _kcf_custom_cmd {
+    local -r cmd="$1"
+
+    case "${cmd}" in
+        kb|ka|kd)
+            _kcf_kustomize_cmd "$@"
+            ;;
+        *)
+            log_error "Custom command '${cmd}' not supported!"
+            return 1
+            ;;
+    esac
+}
+
 # Parse options and execute kubectl commands
 function _kcf_kubectl_cmd {
     local readonly cmd="$1"
@@ -440,25 +487,30 @@ function main {
         log_error "No argument found!"
         print_usage
         exit 1
-    elif [[ $# -eq 1 ]]; then
-        log_warn "At least 2 arguments are required. 'kubectl' will be used instead. Type 'kcf' to see help."
-    elif [[ $# -ge 2 ]]; then
+    else
         local readonly cmd="$1"
-        local readonly type="$2"
 
         # Check cmd. If cmd not supported, call kubectl instead.
-        if [[ "$(array_contains "${cmd}" "${SUPPORTED_CMD[@]}")" == "-1" ]]; then
-            log_warn "${cmd} not supported! 'kubectl' will be used instead. Type 'kcf' to see help."
-        else
-            # Check resource type. If resource type is not in the list of api-resources
-            # then return error.
-            if [[ "$(array_contains "${type}" $(_kcf_get_api_resources))" == "-1" ]]; then
-                log_error "Resource type ${type} not supported!. Type 'kcf api-resources' to known more."
-                return 1
-            fi
+        # Check cmd against list of kubectl supported commands
+        if [[ "$(array_contains "${cmd}" "${SUPPORTED_CMD[@]}")" != "-1" ]]; then
+            if [[ $# -ge 2 ]]; then
+                local readonly type="$2"
+                # Check resource type. If resource type is not in the list of api-resources
+                # then return error.
+                if [[ "$(array_contains "${type}" $(_kcf_get_api_resources))" == "-1" ]]; then
+                    log_error "Resource type ${type} not supported!. Type 'kcf api-resources' to known more."
+                    return 1
+                fi
 
-            _kcf_kubectl_cmd "$@"
+                _kcf_kubectl_cmd "$@"
+                exit $?
+            fi
+        # Check cmd against list of custom commands
+        elif [[ "$(array_contains "${cmd}" "${CUSTOM_CMD[@]}")" != "-1" ]]; then
+            _kcf_custom_cmd "$@"
             exit $?
+        else
+            log_warn "${cmd} not supported! 'kubectl' will be used instead. Type 'kcf' to see help."
         fi
     fi
 
