@@ -19,7 +19,7 @@ function print_usage {
 
     Usage: ${SCRIPT_NAME} <CMD> <TYPE> <OPTION1>...<OPTIONX>
 
-    CMD:       $(array_join ", " "${SUPPORTED_CMD[@]}")
+    CMD:       $(array_join ", " "${SUPPORTED_CMD[@]}"), $(array_join ", " "${CUSTOM_CMD[@]}").
     TYPE:      all kubectl resource types supported by the above commands.
     OPTIONS:   all kubectl options normally used with the above commands & types.
 
@@ -35,6 +35,9 @@ function print_usage {
 
     - Watch logs of a container within a pod in a given namespace:
       kcf logs pod -n istio-system -f
+
+    - Kustomize build in the specific folder
+      kcf kb ./env
 EOF
 }
 
@@ -391,7 +394,6 @@ function _kcf_kubectl_cmd {
     local get_opts=""
     local cmd_opts=""
     local args=""
-    local multiple_selection=0
 
     while [[ $# > 0 ]]; do
         local key="$1"
@@ -425,12 +427,6 @@ function _kcf_kubectl_cmd {
     # Colorize eventually resource list
     resources=$(_kcf_colorize_resources "${type}" "${resources}")
 
-    # Split string containing all resources to array with '\n' as delimiter
-    #local SAVEIFS=${IFS}
-    #local IFS=$'\n'
-    #local readonly arr_resources=($resources)
-    #IFS=${SAVEIFS}
-
     if [[ $(echo "$resources" | wc -l) -gt 1 ]]; then
         #echo "${resources}" | fzf | awk '{print $1}' | xargs -o -I % kubectl ${cmd} ${type}/% ${ns} ${args}
 
@@ -449,7 +445,6 @@ function _kcf_kubectl_cmd {
 
         # Enable multi-select mode for commands: DELETE
         if [[ "$(array_contains "${cmd}" "${SUPPORTED_CMD_MULTIPLE_SELECTION[@]}")" != "-1" ]]; then
-            multiple_selection=1
             FZF_CUSTOM_OPTS="${FZF_OPTS} -m"
             FZF_HEADER="Select one or multiple resources (using TAB):"
         else
@@ -457,54 +452,28 @@ function _kcf_kubectl_cmd {
             FZF_HEADER="Select a resource:"
         fi
 
-        echo "$FZF_CUSTOM_OPTS"
         # tail -n +2 to show all lines except for the header
         # awk according to the index values of the fields namespace and name in the header line
-        # if namespace field is not present (index < -1), then only print name field.
-        # We reverse orders of namespace & name while printing.
-        # Like that, resource_name variable is always set even in the case of non presence
-        # of namespace field.
+        read -a selected_resources <<< $(echo "${resources}" | tail -n +2 | fzf ${FZF_CUSTOM_OPTS} --header="${FZF_HEADER}"| awk -v idx_ns=${idx_ns} -v idx_name=${idx_name} -v default_ns="${namespace/-n /}" '{if (idx_ns > 0)  printf("%s %s ", $idx_name, $idx_ns); else if (default_ns != "") printf("%s %s ", $idx_name, default_ns); else printf("%s n/a", $idx_name)}')
 
-        read -a selected_resources <<< $(echo "${resources}" | tail -n +2 | fzf ${FZF_CUSTOM_OPTS} --header="${FZF_HEADER}"| awk -v idx_ns=${idx_ns} -v idx_name=${idx_name} '{if (idx_ns > 0)  printf("%s %s ", $idx_name, $idx_ns); else printf("%s ", $idx_name)}')
-
-        local str_opts=""
-        local resource_ns=""
-        local resource_names=""
-
-        # Only in the case of --all-namespaces and multiple selection (DELETE)
         # we need to loop 'selected_resources' 2 per 2 to get resource name & namespace
         # and execute kubectl command for it
-        if [[ ${idx_ns} -gt 0 && ${multiple_selection} -eq 1 ]]; then
-            for ((i=0; i<${#selected_resources[@]}; i=i+2 )); do
-                str_opts="${cmd} ${type} ${selected_resources[$i]} -n ${selected_resources[(($i+1))]} ${cmd_opts}"
-                log_info "kubectl $str_opts"
-                #kubectl $str_opts
-            done
-        else
+        for ((i=0; i<${#selected_resources[@]}; i=i+2 )); do
+            local str_opts=""
+            local resource_ns=""
+            local resource_name="${selected_resources[$i]}"
 
-            # When we arrive here, there are 2 cases:
-            # - all namespaces without multiple selection: awk result is composed of 2 fields: resource name (unique) and resource namespace
-            # - multiple selection without all namespaces: namespace is the value specified in command line and resource names is a string composed of multiple values selected from fzf
-
-            # If namespace is defined (--all-namespaces case)
-            # (index of namespace field in header line > 0)
-            # then add "-n" to define option
-            if [[ ${idx_ns} -gt 0 ]]; then
-                resource_ns="-n ${selected_resources[1]}"
-                resource_names="${selected_resources[0]}"
-            else
-                resource_ns="${namespace}"
-                resource_names="${selected_resources[@]}"
+            if [[ "${selected_resources[(($i+1))]}" != "n/a" ]]; then
+                resource_ns="-n ${selected_resources[(($i+1))]}"
             fi
 
-            # Concatenate options
-            str_opts="${cmd} ${type} ${resource_names} ${resource_ns} ${cmd_opts}"
+            str_opts="${cmd} ${type}/${resource_name} ${resource_ns} ${cmd_opts}"
 
             # Check if cmd needs to specify container
             if [[ "$(array_contains "${cmd}" "${SUPPORTED_CMD_CONTAINER[@]}")" != "-1" ]]; then
                 # Must store the result into an intermediare variable because of
                 # log_info in the function _kcf_get_pod_containers
-                local containers=$(_kcf_get_pod_containers "${resource_names}" "${resource_ns}")
+                local containers=$(_kcf_get_pod_containers "${resource_name}" "${resource_ns}")
                 local container=$(echo "${containers}"| fzf ${FZF_OPTS} --header="Select a container:" | awk '{print $1}')
 
                 str_opts="${str_opts} -c ${container}"
@@ -514,11 +483,11 @@ function _kcf_kubectl_cmd {
             str_opts=$(str_remove_spaces "${str_opts} ${args}")
 
             log_info "kubectl ${str_opts}"
-            #kubectl ${str_opts}
-        fi
+            kubectl ${str_opts}
+        done
     else
         log_warn "No resource found!"
-        fi
+    fi
 }
 
 # Main
