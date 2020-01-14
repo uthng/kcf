@@ -6,7 +6,7 @@ set -eou pipefail
 readonly SCRIPT_NAME="$(basename "$0")"
 readonly FZF_OPTS=${FZF_OPTS:-"--ansi --no-preview --layout=reverse"}
 readonly -a SUPPORTED_CMD=("exec" "logs" "describe" "delete" "rollout" "scale" "autoscale" "label" "annotate")
-readonly -a CUSTOM_CMD=("kb" "ka")
+readonly -a CUSTOM_CMD=("kb" "ka" "tfwsa" "tfwsp" "tfwsd" "tfwsr")
 readonly -a SUPPORTED_CMD_CONTAINER=("exec" "logs")
 readonly -a SUPPORTED_CMD_MULTIPLE_SELECTION=("delete")
 
@@ -367,6 +367,34 @@ function _kcf_kustomize_cmd {
     eval "${kustomize_cmd}"
 }
 
+# Handle kustomize commands
+function _kcf_terraform_cmd {
+    local -r cmd="$1"
+    local -r tfws=$(terraform workspace list | fzf ${FZF_OPTS} -m --header="Select a Terraform Workspace:")
+    assert_not_empty "${tfws}" "A workspace must be selected!"
+
+    terraform workspace select "${tfws//[\* ]/}"
+
+    case "${cmd}" in
+        tfwsp)
+            terraform plan
+            ;;
+        tfwsa)
+            terraform apply
+            ;;
+        tfwsd)
+            terraform destroy
+            ;;
+        tfwsr)
+            terraform delete "${tfws}"
+            ;;
+        *)
+            log_error "Terraform command '${cmd}' unknown!"
+            return 1
+            ;;
+    esac
+}
+
 # Execute custom commands
 function _kcf_custom_cmd {
     local -r cmd="$1"
@@ -374,6 +402,9 @@ function _kcf_custom_cmd {
     case "${cmd}" in
         kb|ka|kd)
             _kcf_kustomize_cmd "$@"
+            ;;
+        tfwsp|tfwsa|tfwsd|tfwsr)
+            _kcf_terraform_cmd "$@"
             ;;
         *)
             log_error "Custom command '${cmd}' not supported!"
