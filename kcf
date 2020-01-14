@@ -364,7 +364,7 @@ function _kcf_kustomize_cmd {
     fi
 
     log_info "${kustomize_cmd}"
-    ${kustomize_cmd}
+    eval "${kustomize_cmd}"
 }
 
 # Execute custom commands
