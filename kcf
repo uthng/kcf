@@ -6,7 +6,7 @@ set -eou pipefail
 readonly SCRIPT_NAME="$(basename "$0")"
 readonly FZF_OPTS=${FZF_OPTS:-"--ansi --no-preview --layout=reverse"}
 readonly -a SUPPORTED_CMD=("exec" "logs" "describe" "delete" "rollout" "scale" "autoscale" "label" "annotate")
-readonly -a CUSTOM_CMD=("kb" "ka" "tfwsa" "tfwsp" "tfwsd" "tfwsr")
+readonly -a CUSTOM_CMD=("kb" "ka" "kd" "tfwsa" "tfwsp" "tfwsd" "tfwsr")
 readonly -a SUPPORTED_CMD_CONTAINER=("exec" "logs")
 readonly -a SUPPORTED_CMD_MULTIPLE_SELECTION=("delete")
 
