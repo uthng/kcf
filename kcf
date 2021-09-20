@@ -5,7 +5,7 @@ set -eou pipefail
 
 readonly SCRIPT_NAME="$(basename "$0")"
 readonly FZF_OPTS=${FZF_OPTS:-"--ansi --no-preview --layout=reverse"}
-readonly -a SUPPORTED_CMD=("exec" "logs" "describe" "delete" "rollout" "scale" "autoscale" "label" "annotate")
+readonly -a SUPPORTED_CMD=("exec" "logs" "describe" "delete" "rollout" "scale" "autoscale" "label" "annotate" "view")
 readonly -a CUSTOM_CMD=("kb" "ka" "kd" "tfwsa" "tfwsp" "tfwsd" "tfwsr")
 readonly -a SUPPORTED_CMD_CONTAINER=("exec" "logs")
 readonly -a SUPPORTED_CMD_MULTIPLE_SELECTION=("delete")
@@ -261,6 +261,30 @@ function _kcf_get_pod_containers {
     kubectl ${str_opts} | sed "s/\'//g" | tr " " "\n"
 }
 
+# Get a list of data entries within a secret
+# Params:
+#   $1: secret
+#   $2: options compatible with command `kubectl get secrets`
+# Return
+#   string containing containers with separator newline "\n"
+#
+# Examples:
+#   _kcf_get_secret_data "vault-server-vault-tls" "-n vault"
+#   Returns: "ca.crt\ntls.crt\ntls.key"
+function _kcf_get_secret_data {
+    local -r secretname="$1"
+    local -r opts="$2"
+
+    local str_opts=`str_remove_spaces "get secrets ${secretname} ${opts} -o jsonpath='{.data}'"`
+
+    log_info "kubectl ${str_opts}"
+
+    # Dont know why there are quote un the returned string.
+    # So need to remove them and replace space by newline \n
+    # to show correctly the list with fzf
+    kubectl ${str_opts} | sed "s/\'//g" | jq 'keys' | jq '.[]' | sed "s/\"//g"
+}
+
 # Get header line of resource list and convert it to an array
 function _kcf_get_resource_header {
     local -r resources="$1"
@@ -498,23 +522,43 @@ function _kcf_kubectl_cmd {
                 resource_ns="-n ${selected_resources[(($i+1))]}"
             fi
 
-            str_opts="${cmd} ${type}/${resource_name} ${resource_ns} ${cmd_opts}"
+            if [[ "${cmd}" == "view" && "${type}" == "secrets" ]]; then
+                str_opts="get ${type}/${resource_name} ${resource_ns} ${cmd_opts}"
 
-            # Check if cmd needs to specify container
-            if [[ "$(array_contains "${cmd}" "${SUPPORTED_CMD_CONTAINER[@]}")" != "-1" ]]; then
-                # Must store the result into an intermediare variable because of
-                # log_info in the function _kcf_get_pod_containers
-                local containers=$(_kcf_get_pod_containers "${resource_name}" "${resource_ns}")
-                local container=$(echo "${containers}"| fzf ${FZF_OPTS} --header="Select a container:" | awk '{print $1}')
+                local data=$(_kcf_get_secret_data "${resource_name}" "${resource_ns}")
+                local entry=$(echo "${data}"| fzf ${FZF_OPTS} --header="Select a secret data:" | awk '{print $1}')
 
-                str_opts="${str_opts} -c ${container}"
+                # Escape dot (.)
+                entry=${entry//\./\\.}
+
+                str_opts="${str_opts} -o jsonpath='{.data.${entry}}'"
+
+                # Add args and clean spaces in the final option string
+                str_opts=$(str_remove_spaces "${str_opts} ${args}")
+
+                log_info "kubectl ${str_opts} | base64 -D"
+                kubectl ${str_opts} | sed "s/\'//g" | base64 -D
+            else
+                str_opts="${cmd} ${type}/${resource_name} ${resource_ns} ${cmd_opts}"
+
+                # Check if cmd needs to specify container
+                if [[ "$(array_contains "${cmd}" "${SUPPORTED_CMD_CONTAINER[@]}")" != "-1" ]]; then
+                    # Must store the result into an intermediare variable because of
+                    # log_info in the function _kcf_get_pod_containers
+                    local containers=$(_kcf_get_pod_containers "${resource_name}" "${resource_ns}")
+                    local container=$(echo "${containers}"| fzf ${FZF_OPTS} --header="Select a container:" | awk '{print $1}')
+
+                    str_opts="${str_opts} -c ${container}"
+                fi
+
+                # Add args and clean spaces in the final option string
+                str_opts=$(str_remove_spaces "${str_opts} ${args}")
+
+                log_info "kubectl ${str_opts}"
+                kubectl ${str_opts}
             fi
 
-            # Add args and clean spaces in the final option string
-            str_opts=$(str_remove_spaces "${str_opts} ${args}")
 
-            log_info "kubectl ${str_opts}"
-            kubectl ${str_opts}
         done
     else
         log_warn "No resource found!"
