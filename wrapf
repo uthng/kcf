@@ -13,9 +13,9 @@ readonly -a SUPPORTED_CMD_MULTIPLE_SELECTION=("delete")
 # Print usage or help of this script
 function print_usage {
     cat <<EOF
-    ${SCRIPT_NAME} wraps certain kubectl commands with fzf. It means that it allows you to select a resource corresponding to the specified type and perform the given command on it.
+    ${SCRIPT_NAME} wraps certain kubectl, kustomize and terraform  commands with fzf. It means that it allows you to select a resource corresponding to the specified type and perform the given command on it.
 
-    ${SCRIPT_NAME} uses the same commands, resource types and options as kubectl.
+    For kubernetes, ${SCRIPT_NAME} uses the same commands, resource types and options as kubectl.
 
     Usage: ${SCRIPT_NAME} <CMD> <TYPE> <OPTION1>...<OPTIONX>
 
@@ -23,21 +23,23 @@ function print_usage {
     TYPE:      all kubectl resource types supported by the above commands.
     OPTIONS:   all kubectl options normally used with the above commands & types.
 
+    Check README.md to have more details on the usage of this tool.
+
     Examples:
     - Describe a pod in a given namespace:
-      kcf describe pod -n istio-system
+      wrapf describe pod -n istio-system
 
     - Execute a command shell in a container within a pod:
-      kcf exec pod -n dsf-offer-catalog-orchestrator -- ls -la
+      wrapf exec pod -n dsf-offer-catalog-orchestrator -- ls -la
 
     - Execute a interactive shell in a container within a pod:
-      kcf exec pod -n dsf-offer-catalog-orchestrator -it -- bash
+      wrapf exec pod -n dsf-offer-catalog-orchestrator -it -- bash
 
     - Watch logs of a container within a pod in a given namespace:
-      kcf logs pod -n istio-system -f
+      wrapf logs pod -n istio-system -f
 
     - Kustomize build in the specific folder
-      kcf kb ./env
+      wrapf kb ./env
 EOF
 }
 
@@ -245,9 +247,9 @@ function str_remove_spaces {
 #   string containing containers with separator newline "\n"
 #
 # Examples:
-#   _kcf_get_pod_containers "grafana-5f68d98f87-hvmbb" "-n istio-system"
+#   _wrapf_get_pod_containers "grafana-5f68d98f87-hvmbb" "-n istio-system"
 #   Returns: "grafana\nistio-proxy"
-function _kcf_get_pod_containers {
+function _wrapf_get_pod_containers {
     local -r podname="$1"
     local -r opts="$2"
 
@@ -269,9 +271,9 @@ function _kcf_get_pod_containers {
 #   string containing containers with separator newline "\n"
 #
 # Examples:
-#   _kcf_get_secret_data "vault-server-vault-tls" "-n vault"
+#   _wrapf_get_secret_data "vault-server-vault-tls" "-n vault"
 #   Returns: "ca.crt\ntls.crt\ntls.key"
-function _kcf_get_secret_data {
+function _wrapf_get_secret_data {
     local -r secretname="$1"
     local -r opts="$2"
 
@@ -286,7 +288,7 @@ function _kcf_get_secret_data {
 }
 
 # Get header line of resource list and convert it to an array
-function _kcf_get_resource_header {
+function _wrapf_get_resource_header {
     local -r resources="$1"
 
     local header=$(echo "$resources" | head -n 1)
@@ -294,7 +296,7 @@ function _kcf_get_resource_header {
 
 # Get a list of names & shortnames from api-resources
 # convert it to an array
-function _kcf_get_api_resources {
+function _wrapf_get_api_resources {
     local -r api_resources=$(kubectl api-resources)
     # Get header line & convert it to an array of fields
     local -r header=$(echo "${api_resources}" | head -n 1)
@@ -310,13 +312,13 @@ function _kcf_get_api_resources {
     echo "${arr_resources[@]}"
 }
 
-function _kcf_colorize_resources {
+function _wrapf_colorize_resources {
     local -r type="$1"
     local -r resources="$2"
 
     case "${type}" in
         pods)
-            echo "$(_kcf_colorize_type_pod "${resources}")"
+            echo "$(_wrapf_colorize_type_pod "${resources}")"
             ;;
         *)
             echo "${resources}"
@@ -325,7 +327,7 @@ function _kcf_colorize_resources {
 }
 
 # Colorize pod resources according to  their status.
-function _kcf_colorize_type_pod {
+function _wrapf_colorize_type_pod {
     local -r resources="$1"
     local -r arr_header=($(echo "${resources}" | head -n 1))
     local -r cyan=$(tput setaf 006)
@@ -359,7 +361,7 @@ function _kcf_colorize_type_pod {
 }
 
 # Handle kustomize commands
-function _kcf_kustomize_cmd {
+function _wrapf_kustomize_cmd {
     local -r cmd="$1"
     local path="."
 
@@ -392,7 +394,7 @@ function _kcf_kustomize_cmd {
 }
 
 # Handle kustomize commands
-function _kcf_terraform_cmd {
+function _wrapf_terraform_cmd {
     local -r cmd="$1"
     local -r tfws=$(terraform workspace list | fzf ${FZF_OPTS} -m --header="Select a Terraform Workspace:")
     assert_not_empty "${tfws}" "A workspace must be selected!"
@@ -420,15 +422,15 @@ function _kcf_terraform_cmd {
 }
 
 # Execute custom commands
-function _kcf_custom_cmd {
+function _wrapf_custom_cmd {
     local -r cmd="$1"
 
     case "${cmd}" in
         kb|ka|kd)
-            _kcf_kustomize_cmd "$@"
+            _wrapf_kustomize_cmd "$@"
             ;;
         tfwsp|tfwsa|tfwsd|tfwsr)
-            _kcf_terraform_cmd "$@"
+            _wrapf_terraform_cmd "$@"
             ;;
         *)
             log_error "Custom command '${cmd}' not supported!"
@@ -438,7 +440,7 @@ function _kcf_custom_cmd {
 }
 
 # Parse options and execute kubectl commands
-function _kcf_kubectl_cmd {
+function _wrapf_kubectl_cmd {
     local readonly cmd="$1"
     local readonly type="$2"
     shift 2
@@ -480,7 +482,7 @@ function _kcf_kubectl_cmd {
     local resources=$(kubectl ${str_opts})
 
     # Colorize eventually resource list
-    resources=$(_kcf_colorize_resources "${type}" "${resources}")
+    resources=$(_wrapf_colorize_resources "${type}" "${resources}")
 
     if [[ $(echo "$resources" | wc -l) -gt 1 ]]; then
         #echo "${resources}" | fzf | awk '{print $1}' | xargs -o -I % kubectl ${cmd} ${type}/% ${ns} ${args}
@@ -525,7 +527,7 @@ function _kcf_kubectl_cmd {
             if [[ "${cmd}" == "view" && "${type}" == "secrets" ]]; then
                 str_opts="get ${type}/${resource_name} ${resource_ns} ${cmd_opts}"
 
-                local data=$(_kcf_get_secret_data "${resource_name}" "${resource_ns}")
+                local data=$(_wrapf_get_secret_data "${resource_name}" "${resource_ns}")
                 local entries=$(echo "${data}"| fzf -m ${FZF_OPTS} --header="Select one or multiple secret data (using TAB):" | awk '{print $1}')
 
                 for entry in ${entries}; do
@@ -547,8 +549,8 @@ function _kcf_kubectl_cmd {
                 # Check if cmd needs to specify container
                 if [[ "$(array_contains "${cmd}" "${SUPPORTED_CMD_CONTAINER[@]}")" != "-1" ]]; then
                     # Must store the result into an intermediare variable because of
-                    # log_info in the function _kcf_get_pod_containers
-                    local containers=$(_kcf_get_pod_containers "${resource_name}" "${resource_ns}")
+                    # log_info in the function _wrapf_get_pod_containers
+                    local containers=$(_wrapf_get_pod_containers "${resource_name}" "${resource_ns}")
                     local container=$(echo "${containers}"| fzf ${FZF_OPTS} --header="Select a container:" | awk '{print $1}')
 
                     str_opts="${str_opts} -c ${container}"
@@ -584,20 +586,20 @@ function main {
                 local readonly type="$2"
                 # Check resource type. If resource type is not in the list of api-resources
                 # then return error.
-                if [[ "$(array_contains "${type}" $(_kcf_get_api_resources))" == "-1" ]]; then
-                    log_error "Resource type ${type} not supported!. Type 'kcf api-resources' to known more."
+                if [[ "$(array_contains "${type}" $(_wrapf_get_api_resources))" == "-1" ]]; then
+                    log_error "Resource type ${type} not supported!. Type 'wrapf api-resources' to known more."
                     return 1
                 fi
 
-                _kcf_kubectl_cmd "$@"
+                _wrapf_kubectl_cmd "$@"
                 exit $?
             fi
         # Check cmd against list of custom commands
         elif [[ "$(array_contains "${cmd}" "${CUSTOM_CMD[@]}")" != "-1" ]]; then
-            _kcf_custom_cmd "$@"
+            _wrapf_custom_cmd "$@"
             exit $?
         else
-            log_warn "${cmd} not supported! 'kubectl' will be used instead. Type 'kcf' to see help."
+            log_warn "${cmd} not supported! 'kubectl' will be used instead. Type 'wrapf' to see help."
         fi
     fi
 
