@@ -526,18 +526,21 @@ function _kcf_kubectl_cmd {
                 str_opts="get ${type}/${resource_name} ${resource_ns} ${cmd_opts}"
 
                 local data=$(_kcf_get_secret_data "${resource_name}" "${resource_ns}")
-                local entry=$(echo "${data}"| fzf ${FZF_OPTS} --header="Select a secret data:" | awk '{print $1}')
+                local entries=$(echo "${data}"| fzf -m ${FZF_OPTS} --header="Select one or multiple secret data (using TAB):" | awk '{print $1}')
 
-                # Escape dot (.)
-                entry=${entry//\./\\.}
+                for entry in ${entries}; do
+                    # Escape dot (.)
+                    entry=${entry//\./\\.}
 
-                str_opts="${str_opts} -o jsonpath='{.data.${entry}}'"
+                    str_opts_plus="${str_opts} -o jsonpath='{.data.${entry}}'"
 
-                # Add args and clean spaces in the final option string
-                str_opts=$(str_remove_spaces "${str_opts} ${args}")
+                    # Add args and clean spaces in the final option string
+                    str_opts_plus=$(str_remove_spaces "${str_opts_plus} ${args}")
 
-                log_info "kubectl ${str_opts} | base64 -D"
-                kubectl ${str_opts} | sed "s/\'//g" | base64 -D
+                    log_info "kubectl ${str_opts_plus} | base64 -D"
+                    kubectl ${str_opts_plus} | sed "s/\'//g" | base64 -D
+                    echo
+                done
             else
                 str_opts="${cmd} ${type}/${resource_name} ${resource_ns} ${cmd_opts}"
 
