@@ -263,6 +263,30 @@ function _wrapf_get_pod_containers {
     kubectl ${str_opts} | sed "s/\'//g" | tr " " "\n"
 }
 
+# Get a list of init containers within a pod
+# Params:
+#   $1: pod name
+#   $2: options compatible with command `kubectl get pod`
+# Return
+#   string containing containers with separator newline "\n"
+#
+# Examples:
+#   _wrapf_get_pod_init_containers "grafana-5f68d98f87-hvmbb" "-n istio-system"
+#   Returns: "grafana\nistio-proxy"
+function _wrapf_get_pod_init_containers {
+    local -r podname="$1"
+    local -r opts="$2"
+
+    local str_opts=`str_remove_spaces "get pod/${podname} ${opts} -o jsonpath='{.spec.initContainers[*].name}'"`
+
+    log_info "kubectl ${str_opts}"
+
+    # Dont know why there are quote un the returned string.
+    # So need to remove them and replace space by newline \n
+    # to show correctly the list with fzf
+    kubectl ${str_opts} | sed "s/\'//g" | tr " " "\n"
+}
+
 # Get a list of data entries within a secret
 # Params:
 #   $1: secret
@@ -551,7 +575,8 @@ function _wrapf_kubectl_cmd {
                     # Must store the result into an intermediare variable because of
                     # log_info in the function _wrapf_get_pod_containers
                     local containers=$(_wrapf_get_pod_containers "${resource_name}" "${resource_ns}")
-                    local container=$(echo "${containers}"| fzf ${FZF_OPTS} --header="Select a container:" | awk '{print $1}')
+                    local initContainers=$(_wrapf_get_pod_init_containers "${resource_name}" "${resource_ns}")
+                    local container=$(echo -e "${containers}\n${initContainers}"| fzf ${FZF_OPTS} --header="Select a container or init container:" | awk '{print $1}')
 
                     str_opts="${str_opts} -c ${container}"
                 fi
