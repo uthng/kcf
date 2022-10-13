@@ -6,7 +6,7 @@ set -eou pipefail
 readonly SCRIPT_NAME="$(basename "$0")"
 readonly FZF_OPTS=${FZF_OPTS:-"--ansi --no-preview --layout=reverse"}
 readonly -a SUPPORTED_CMD=("exec" "logs" "describe" "delete" "rollout" "scale" "autoscale" "label" "annotate" "view")
-readonly -a CUSTOM_CMD=("kb" "ka" "kd" "tfwsa" "tfwsp" "tfwsd" "tfwsr")
+readonly -a CUSTOM_CMD=("kb" "kbv" "ka" "kav" "kd" "kdv" "tfwsa" "tfwsp" "tfwsd" "tfwsr")
 readonly -a SUPPORTED_CMD_CONTAINER=("exec" "logs")
 readonly -a SUPPORTED_CMD_MULTIPLE_SELECTION=("delete")
 
@@ -400,14 +400,21 @@ function _wrapf_kustomize_cmd {
     assert_not_empty "${folder}" "Folder must not be empty!"
 
     local -r kustomize_build="kustomize build ${folder}"
+    local -r kustomize_build_vault="kustomize build ${folder} | argocd-vault-plugin generate -"
     local kustomize_cmd=""
 
     if [[ "${cmd}" == "kb" ]]; then
         kustomize_cmd="${kustomize_build}"
+    elif [[ "${cmd}" == "kbv" ]]; then
+        kustomize_cmd="${kustomize_build_vault}"
     elif [[ "${cmd}" == "ka" ]]; then
         kustomize_cmd="${kustomize_build} | kubectl apply -f -"
+    elif [[ "${cmd}" == "kav" ]]; then
+        kustomize_cmd="${kustomize_build_vault} | kubectl apply -f -"
     elif [[ "${cmd}" == "kd" ]]; then
         kustomize_cmd="${kustomize_build} | kubectl delete -f -"
+    elif [[ "${cmd}" == "kdv" ]]; then
+        kustomize_cmd="${kustomize_build_vault} | kubectl delete -f -"
     else
         log_error "Kustomize command ${cmd} unknown!"
         return 1
@@ -450,7 +457,7 @@ function _wrapf_custom_cmd {
     local -r cmd="$1"
 
     case "${cmd}" in
-        kb|ka|kd)
+        kb|kbv|ka|kav|kd|kdv)
             _wrapf_kustomize_cmd "$@"
             ;;
         tfwsp|tfwsa|tfwsd|tfwsr)
